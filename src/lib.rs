@@ -45,7 +45,7 @@ use bitflags::bitflags;
 pub use embedded_can::{ExtendedId, Id, StandardId};
 use libc::{
     bind, c_int, c_short, c_void, close, fcntl, read, setsockopt, sockaddr, socket, write, F_GETFL,
-    F_SETFL, O_NONBLOCK, SOCK_DGRAM,
+    F_SETFL, O_NONBLOCK, SOCK_DGRAM, SOL_SOCKET, SO_RCVTIMEO,
 };
 use nix::net::if_::if_nametoindex;
 use std::convert::TryFrom;
@@ -424,6 +424,7 @@ impl IsoTpSocket {
             Some(IsoTpOptions::default()),
             Some(FlowControlOptions::default()),
             Some(LinkLayerOptions::default()),
+            None,
         )
     }
 
@@ -438,6 +439,7 @@ impl IsoTpSocket {
         isotp_options: Option<IsoTpOptions>,
         rx_flow_control_options: Option<FlowControlOptions>,
         link_layer_options: Option<LinkLayerOptions>,
+        rx_timeout: Option<std::time::Duration>,
     ) -> Result<Self, Error> {
         let if_index = if_nametoindex(ifname)?;
         Self::open_if_with_opts(
@@ -447,6 +449,7 @@ impl IsoTpSocket {
             isotp_options,
             rx_flow_control_options,
             link_layer_options,
+            rx_timeout,
         )
     }
 
@@ -465,6 +468,7 @@ impl IsoTpSocket {
             Some(IsoTpOptions::default()),
             Some(FlowControlOptions::default()),
             Some(LinkLayerOptions::default()),
+            None,
         )
     }
 
@@ -478,6 +482,7 @@ impl IsoTpSocket {
         isotp_options: Option<IsoTpOptions>,
         rx_flow_control_options: Option<FlowControlOptions>,
         link_layer_options: Option<LinkLayerOptions>,
+        rx_timeout: Option<std::time::Duration>,
     ) -> Result<Self, Error> {
         let rx_id = match rx_id.into() {
             Id::Standard(standard_id) => standard_id.as_raw() as u32,
@@ -516,6 +521,26 @@ impl IsoTpSocket {
                     CAN_ISOTP_OPTS,
                     isotp_options_ptr,
                     ISOTP_OPTIONS_SIZE.try_into().unwrap(),
+                )
+            };
+            if err == -1 {
+                return Err(Error::from(io::Error::last_os_error()));
+            }
+        }
+
+        // Set receive timeout
+        if let Some(timeout) = rx_timeout {
+            let tv = nix::sys::time::TimeVal::new(
+                timeout.as_secs() as i64,
+                timeout.subsec_micros() as i64,
+            );
+            let err = unsafe {
+                setsockopt(
+                    sock_fd,
+                    SOL_SOCKET,
+                    SO_RCVTIMEO,
+                    &tv as *const _ as *const c_void,
+                    size_of::<nix::sys::time::TimeVal>().try_into().unwrap(),
                 )
             };
             if err == -1 {
