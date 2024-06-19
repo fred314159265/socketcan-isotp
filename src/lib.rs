@@ -530,10 +530,22 @@ impl IsoTpSocket {
 
         // Set receive timeout
         if let Some(timeout) = rx_timeout {
-            let tv = nix::sys::time::TimeVal::new(
-                timeout.as_secs() as i64,
-                timeout.subsec_micros() as i64,
-            );
+            let seconds = timeout.as_secs().try_into().map_err(|_| {
+                Error::from(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Provided timeout too large for nix::sys::time::TimeVal.",
+                ))
+            })?;
+            // This conversion needs to be fallable as for 32-bit targets the value may not fit.
+            #[allow(clippy::unnecessary_fallible_conversions)]
+            let microseconds = timeout.subsec_micros().try_into().map_err(|_| {
+                Error::from(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Provided timeout too large for nix::sys::time::TimeVal.",
+                ))
+            })?;
+            let tv = nix::sys::time::TimeVal::new(seconds, microseconds);
+
             let err = unsafe {
                 setsockopt(
                     sock_fd,
